@@ -36,7 +36,7 @@ with open("data.txt") as f:
 words = nltk.tokenize.word_tokenize(content)
 vocabulary_dictionary, reverse_vocabulary_dictionary = word_embedding(words)
 
-window = 3
+window = 5
 num_classes = len(vocabulary_dictionary)
 timesteps = window
 num_hidden = 512
@@ -50,9 +50,11 @@ training_data, label = sampling(words, vocabulary_dictionary, window)
 
 # RNN output node weights and biases
 weights = {
+    'in': tf.Variable(tf.truncated_normal([5,timesteps,1], stddev=0.1)),
     'out': tf.Variable(tf.random_normal([num_hidden, num_classes]))
 }
 biases = {
+    'in': tf.Variable(tf.Variable(tf.constant(0.1, shape=[num_classes]))),
     'out': tf.Variable(tf.random_normal([num_classes]))
 }
 
@@ -115,16 +117,20 @@ with tf.Session() as sess:
                 Y_batch_encoded = np.array(Y_batch_encoded)
                 Y_batch_encoded = Y_batch_encoded.reshape(batch_size, num_classes)
             _, acc, loss, onehot_pred = sess.run([train_op, accuracy, loss_op, logits], feed_dict={X: X_batch, Y: Y_batch_encoded})
-            print("Step " + str(i) + ", Minibatch Loss= " + "{:.4f}".format(loss) + ", Training Accuracy= " + "{:.2f}".format(acc * 100))
+        print("Step " + str(i) + ", Minibatch Loss= " + "{:.4f}".format(loss) + ", Training Accuracy= " + "{:.2f}".format(acc * 100))
 
         if (i+1) % 50 == 0:
             user_input = raw_input().split(' ')
             new_batch = []
             for ui in user_input:
                 new_batch.append([vocabulary_dictionary[ui]])
-            output = sess.run([shower], feed_dict={X: [new_batch], Y: Y_batch_encoded})
-            if len(output) > 0:
-                if len(output[0]) > 0:
-                    a = output[0][0]
-                    predicted_word = reverse_vocabulary_dictionary[a % num_classes]
-                    print("predicted: " + predicted_word)
+            predicted_word = ""
+            for _ in range(7):
+                output = sess.run([shower], feed_dict={X: [new_batch], Y: Y_batch_encoded})
+                if len(output) > 0:
+                    if len(output[0]) > 0:
+                        a = output[0][0]
+                        predicted_word = reverse_vocabulary_dictionary[a % num_classes]
+                        print("predicted: " + predicted_word)
+                        new_batch.pop(0)
+                        new_batch.append([vocabulary_dictionary[predicted_word]])
