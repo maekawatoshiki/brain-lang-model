@@ -28,6 +28,13 @@ class SOM(object):
         the radius of influence of the BMU while training. By default, its
         taken to be half of max(m, n).
         """
+
+        self.r_min = 0.0
+        self.r_max = 0.0
+        self.g_min = 0.0
+        self.g_max = 0.0
+        self.b_min = 0.0
+        self.b_max = 0.0
  
         #Assign required variables first
         self._m = m
@@ -163,7 +170,34 @@ class SOM(object):
         self._weightages = list(self._sess.run(self._weightage_vects))
         self._locations = list(self._sess.run(self._location_vects))
         for i, loc in enumerate(self._locations):
-            centroid_grid[loc[0]].append(self._weightages[i])
+            a = self._weightages[i]
+            count = 0
+            r = 0.0
+            g = 0.0
+            b = 0.0
+            while count < 45:
+                r += a[count]
+                count += 1
+            while count < 90:
+                g += a[count]
+                count += 1
+            while count < 128:
+                b += a[count]
+                count += 1
+            self.r_min = min(self.r_min, r)
+            self.r_max = max(self.r_max, r)
+            self.g_min = min(self.r_min, g)
+            self.g_max = max(self.r_max, g)
+            self.b_min = min(self.r_min, b)
+            self.b_max = max(self.r_max, b)
+
+            b = [
+                    (r + abs(self.r_min)) / (abs(self.r_max) + abs(self.r_min)) * 256,
+                    (g + abs(self.g_min)) / (abs(self.g_max) + abs(self.g_min)) * 256,
+                    (b + abs(self.b_min)) / (abs(self.b_max) + abs(self.b_min)) * 256,
+                ]
+
+            centroid_grid[loc[0]].append(b)
         self._centroid_grid = centroid_grid
  
         self._trained = True
@@ -203,31 +237,8 @@ class SOM(object):
 #For plotting the images
 from matplotlib import pyplot as plt
  
-#Training inputs for RGBcolors
-colors = np.array(
-     [[0., 0., 0.],
-      [0., 0., 1.],
-      [0., 0., 0.5],
-      [0.125, 0.529, 1.0],
-      [0.33, 0.4, 0.67],
-      [0.6, 0.5, 1.0],
-      [0., 1., 0.],
-      [1., 0., 0.],
-      [0., 1., 1.],
-      [1., 0., 1.],
-      [1., 1., 0.],
-      [1., 1., 1.],
-      [.33, .33, .33],
-      [.5, .5, .5],
-      [.66, .66, .66]])
-color_names = \
-    ['black', 'blue', 'darkblue', 'skyblue',
-     'greyblue', 'lilac', 'green', 'red',
-     'cyan', 'violet', 'yellow', 'white',
-     'darkgrey', 'mediumgrey', 'lightgrey']
- 
-#Train a 30x30 SOM with 400 iterations
-# som = SOM(128, 128, 3, 400)
+#Train SOM with n iterations
+som = SOM(60, 60, 128, 4)
 
 # Word embedding
 def word_embedding(words):
@@ -319,6 +330,8 @@ shower = tf.argmax(prediction,1)
 # Initialize the variables with default values
 init = tf.global_variables_initializer()
 
+memory_for_som = []
+
 with tf.Session() as sess:
     # Run the initializer
     sess.run(init)
@@ -343,26 +356,34 @@ with tf.Session() as sess:
                 X_batch = X_batch.reshape(batch_size, timesteps, num_input)
                 Y_batch_encoded = np.array(Y_batch_encoded)
                 Y_batch_encoded = Y_batch_encoded.reshape(batch_size, num_classes)
-            _, states, acc, loss, onehot_pred = sess.run([train_op, accuracy, loss_op, logits], feed_dict={X: X_batch, Y: Y_batch_encoded})
-        print(len(onehot_pred[0]))
+            _, acc, loss, onehot_pred = sess.run([train_op, accuracy, loss_op, logits], feed_dict={X: X_batch, Y: Y_batch_encoded})
+            state1 = sess.run(states, feed_dict={X: X_batch, Y: Y_batch_encoded})
+
+        som.train([state1[0][0]])
+
         print("Step " + str(i) + ", Minibatch Loss= " + "{:.4f}".format(loss) + ", Training Accuracy= " + "{:.2f}".format(acc * 100))
 
         if (i+1) % 5 == 0:
             saver = tf.train.Saver()
             saver.save(sess, 'model' + str(i))
 
-        if (i+1) % 200 == 0:
-            user_input = input().split(' ')
-            new_batch = []
-            for ui in user_input:
-                new_batch.append([vocabulary_dictionary[ui]])
-            predicted_word = ""
-            for _ in range(10):
-                output = sess.run([shower], feed_dict={X: [new_batch], Y: Y_batch_encoded})
-                if len(output) > 0:
-                    if len(output[0]) > 0:
-                        a = output[0][0]
-                        predicted_word = reverse_vocabulary_dictionary[a % num_classes]
-                        print("predicted: " + predicted_word)
-                        new_batch.pop(0)
-                        new_batch.append([vocabulary_dictionary[predicted_word]])
+        if (i+1) % 1 == 0:
+            image_grid = som.get_centroids()
+            plt.imshow(image_grid)
+            plt.savefig('/home/groupdeep/Desktop/SOM Figures/figure-' + str(i))
+            # plt.show()
+            # # som.train(memory_for_som)
+            # user_input = input().split(' ')
+            # new_batch = []
+            # for ui in user_input:
+            #     new_batch.append([vocabulary_dictionary[ui]])
+            # predicted_word = ""
+            # for _ in range(10):
+            #     output = sess.run([shower], feed_dict={X: [new_batch], Y: Y_batch_encoded})
+            #     if len(output) > 0:
+            #         if len(output[0]) > 0:
+            #             a = output[0][0]
+            #             predicted_word = reverse_vocabulary_dictionary[a % num_classes]
+            #             print("predicted: " + predicted_word)
+            #             new_batch.pop(0)
+            #             new_batch.append([vocabulary_dictionary[predicted_word]])
