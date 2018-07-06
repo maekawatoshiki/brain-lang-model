@@ -29,12 +29,12 @@ class SOM(object):
         taken to be half of max(m, n).
         """
 
-        self.r_min = 0.0
-        self.r_max = 0.0
-        self.g_min = 0.0
-        self.g_max = 0.0
-        self.b_min = 0.0
-        self.b_max = 0.0
+        self.r_min = -1.0
+        self.r_max = 1.0
+        self.g_min = -1.0
+        self.g_max = 1.0
+        self.b_min = -1.0
+        self.b_max = 1.0
  
         #Assign required variables first
         self._m = m
@@ -133,10 +133,10 @@ class SOM(object):
             ##INITIALIZE SESSION
             self._sess = tf.Session()
  
-            ##INITIALIZE VARIABLES
+            ##initialize variables
             init_op = tf.initialize_all_variables()
             self._sess.run(init_op)
- 
+
     def _neuron_locations(self, m, n):
         """
         Yields one by one the 2-D locations of the individual neurons
@@ -175,7 +175,7 @@ class SOM(object):
             r = 0.0
             g = 0.0
             b = 0.0
-            while count < 45:
+            while count < 43:
                 r += a[count]
                 count += 1
             while count < 90:
@@ -184,6 +184,7 @@ class SOM(object):
             while count < 128:
                 b += a[count]
                 count += 1
+
             self.r_min = min(self.r_min, r)
             self.r_max = max(self.r_max, r)
             self.g_min = min(self.r_min, g)
@@ -192,12 +193,13 @@ class SOM(object):
             self.b_max = max(self.r_max, b)
 
             b = [
-                    (r + abs(self.r_min)) / (abs(self.r_max) + abs(self.r_min)) * 256,
-                    (g + abs(self.g_min)) / (abs(self.g_max) + abs(self.g_min)) * 256,
-                    (b + abs(self.b_min)) / (abs(self.b_max) + abs(self.b_min)) * 256,
+                    ((r + abs(self.r_min)) / (abs(self.r_max) + abs(self.r_min))) * 256,
+                    ((g + abs(self.g_min)) / (abs(self.g_max) + abs(self.g_min))) * 256,
+                    ((b + abs(self.b_min)) / (abs(self.b_max) + abs(self.b_min))) * 256,
                 ]
 
-            centroid_grid[loc[0]].append(b)
+            centroid_grid[i % 22].append(b)
+
         self._centroid_grid = centroid_grid
  
         self._trained = True
@@ -238,7 +240,6 @@ class SOM(object):
 from matplotlib import pyplot as plt
  
 #Train SOM with n iterations
-som = SOM(60, 60, 128, 4)
 
 # Word embedding
 def word_embedding(words):
@@ -266,18 +267,21 @@ def sampling(words, vocabulary_dictionary, window):
     return X,Y
 
 
-with open("data.txt") as f:
+with open("data2.txt") as f:
     content = f.read()
 words = nltk.tokenize.word_tokenize(content)
 vocabulary_dictionary, reverse_vocabulary_dictionary = word_embedding(words)
 
-window = 5
+window = 8
 num_classes = len(vocabulary_dictionary)
 timesteps = window
 num_hidden = 128
 num_input = 1
-batch_size = 10
-iteration = 20000
+batch_size = 20
+iteration = 2000
+
+f = open('training_gaaf_tanh_ad_sig.txt','w')
+# f = open('training_softmax.txt','w')
 
 
 training_data, label = sampling(words, vocabulary_dictionary, window)
@@ -317,9 +321,11 @@ outputs, states = RNN(X, weights, biases)
 
 logits = tf.matmul(outputs[-1], weights['out']) + biases['out']
 
-prediction = tf.nn.softmax(logits)
+prediction = tf.nn.tanh(logits) + (tf.subtract(tf.scalar_mul(1000, logits) - tf.floor(tf.scalar_mul(1000, logits)), 0.5) / 1000) * tf.nn.sigmoid(logits)
+# prediction = tf.nn.relu(logits)
 
 # Loss and optimizer
+logits2=tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=Y)
 loss_op = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=Y))
 train_op = tf.train.RMSPropOptimizer(learning_rate=0.001).minimize(loss_op)
 correct_pred = tf.equal(tf.argmax(prediction,1), tf.argmax(Y,1))
@@ -332,7 +338,9 @@ init = tf.global_variables_initializer()
 
 memory_for_som = []
 
-with tf.Session() as sess:
+config = tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True))
+session = tf.Session(config=config)
+with tf.Session(config=config) as sess:
     # Run the initializer
     sess.run(init)
     for i in range(iteration):
@@ -357,20 +365,27 @@ with tf.Session() as sess:
                 Y_batch_encoded = np.array(Y_batch_encoded)
                 Y_batch_encoded = Y_batch_encoded.reshape(batch_size, num_classes)
             _, acc, loss, onehot_pred = sess.run([train_op, accuracy, loss_op, logits], feed_dict={X: X_batch, Y: Y_batch_encoded})
-            state1 = sess.run(states, feed_dict={X: X_batch, Y: Y_batch_encoded})
+            hidden_state = sess.run(states, feed_dict={X: X_batch, Y: Y_batch_encoded})
 
-        som.train([state1[0][0]])
+        for h in hidden_state:
+            for s in h:
+                memory_for_som.append(s) 
 
+        tmp_name = "Loss=" + "{:.4f}".format(loss) + ",Training Accuracy=" + "{:.2f}".format(acc * 100)
         print("Step " + str(i) + ", Minibatch Loss= " + "{:.4f}".format(loss) + ", Training Accuracy= " + "{:.2f}".format(acc * 100))
+        f.write(str(i) + '\t' + "{:.4f}\n".format(loss))
 
-        if (i+1) % 5 == 0:
+        if (i+1) % 20 == 0:
             saver = tf.train.Saver()
             saver.save(sess, 'model' + str(i))
 
-        if (i+1) % 1 == 0:
-            image_grid = som.get_centroids()
-            plt.imshow(image_grid)
-            plt.savefig('/home/groupdeep/Desktop/SOM Figures/figure-' + str(i))
+        # if (i+1) % 1 == 0:
+            # som = SOM(22, 22, 128, 3)
+            # som.train(memory_for_som)
+            # memory_for_som = []
+            # image_grid = som.get_centroids()
+            # plt.imshow(image_grid)
+            # plt.savefig('/home/groupdeep/Desktop/SOM Figures/figure-' + str(i) + "-" + tmp_name + "X.jpg")
             # plt.show()
             # # som.train(memory_for_som)
             # user_input = input().split(' ')
@@ -387,3 +402,6 @@ with tf.Session() as sess:
             #             print("predicted: " + predicted_word)
             #             new_batch.pop(0)
             #             new_batch.append([vocabulary_dictionary[predicted_word]])
+
+
+f.close()
